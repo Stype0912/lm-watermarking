@@ -16,7 +16,6 @@
 
 from __future__ import annotations
 import collections
-import hashlib
 from math import sqrt
 
 import scipy.stats
@@ -33,13 +32,13 @@ from normalizers import normalization_strategy_lookup
 
 class WatermarkBase:
     def __init__(
-            self,
-            vocab: list[int] = None,
-            gamma: float = 0.5,
-            delta: float = 2.0,
-            seeding_scheme: str = "simple_1",  # mostly unused/always default
-            hash_key: int = 15485863,  # just a large prime number to create a rng seed with sufficient bit width
-            select_green_tokens: bool = True,
+        self,
+        vocab: list[int] = None,
+        gamma: float = 0.25,
+        delta: float = 2.0,
+        seeding_scheme: str = "simple_1",  # mostly unused/always default
+        hash_key: int = 15485863,  # just a large prime number to create a rng seed with sufficient bit width
+        select_green_tokens: bool = True,
     ):
 
         # watermarking parameters
@@ -59,31 +58,24 @@ class WatermarkBase:
             seeding_scheme = self.seeding_scheme
 
         if seeding_scheme == "simple_1":
-            assert input_ids.shape[
-                       -1] >= 1, f"seeding_scheme={seeding_scheme} requires at least a 1 token prefix sequence to seed rng"
+            assert input_ids.shape[-1] >= 1, f"seeding_scheme={seeding_scheme} requires at least a 1 token prefix sequence to seed rng"
             prev_token = input_ids[-1].item()
             self.rng.manual_seed(self.hash_key * prev_token)
         else:
             raise NotImplementedError(f"Unexpected seeding_scheme: {seeding_scheme}")
         return
 
-    def _get_greenlist_ids(self, expected_id: int, input_ids: torch.LongTensor) -> list[int]:
+    def _get_greenlist_ids(self, input_ids: torch.LongTensor) -> list[int]:
         # seed the rng using the previous tokens/prefix
         # according to the seeding_scheme
         self._seed_rng(input_ids)
 
-        # greenlist_size = int(self.vocab_size * self.gamma)
-        # vocab_permutation = torch.randperm(self.vocab_size, device=input_ids.device, generator=self.rng)
-        # if self.select_green_tokens:  # directly
-        #     greenlist_ids = vocab_permutation[:greenlist_size]  # new
-        # else:  # select green via red
-        #     greenlist_ids = vocab_permutation[(self.vocab_size - greenlist_size) :]  # legacy behavior
-        greenlist_ids = []
-        for i in range(self.vocab_size):
-            obj = hashlib.sha3_256()
-            obj.update(str(i).encode("utf-8"))
-            if int(obj.hexdigest(), 16) & 1 == expected_id:
-                greenlist_ids.append(i)
+        greenlist_size = int(self.vocab_size * self.gamma)
+        vocab_permutation = torch.randperm(self.vocab_size, device=input_ids.device, generator=self.rng)
+        if self.select_green_tokens:  # directly
+            greenlist_ids = vocab_permutation[:greenlist_size]  # new
+        else:  # select green via red
+            greenlist_ids = vocab_permutation[(self.vocab_size - greenlist_size) :]  # legacy behavior
         return greenlist_ids
 
 
@@ -99,8 +91,7 @@ class WatermarkLogitsProcessor(WatermarkBase, LogitsProcessor):
         final_mask = green_tokens_mask.bool()
         return final_mask
 
-    def _bias_greenlist_logits(self, scores: torch.Tensor, greenlist_mask: torch.Tensor,
-                               greenlist_bias: float) -> torch.Tensor:
+    def _bias_greenlist_logits(self, scores: torch.Tensor, greenlist_mask: torch.Tensor, greenlist_bias: float) -> torch.Tensor:
         scores[greenlist_mask] = scores[greenlist_mask] + greenlist_bias
         return scores
 
@@ -127,14 +118,14 @@ class WatermarkLogitsProcessor(WatermarkBase, LogitsProcessor):
 
 class WatermarkDetector(WatermarkBase):
     def __init__(
-            self,
-            *args,
-            device: torch.device = None,
-            tokenizer: Tokenizer = None,
-            z_threshold: float = 4.0,
-            normalizers: list[str] = ["unicode"],  # or also: ["unicode", "homoglyphs", "truecase"]
-            ignore_repeated_bigrams: bool = True,
-            **kwargs,
+        self,
+        *args,
+        device: torch.device = None,
+        tokenizer: Tokenizer = None,
+        z_threshold: float = 4.0,
+        normalizers: list[str] = ["unicode"],  # or also: ["unicode", "homoglyphs", "truecase"]
+        ignore_repeated_bigrams: bool = True,
+        **kwargs,
     ):
         super().__init__(*args, **kwargs)
         # also configure the metrics returned/preprocessing options
@@ -172,14 +163,14 @@ class WatermarkDetector(WatermarkBase):
         return p_value
 
     def _score_sequence(
-            self,
-            input_ids: Tensor,
-            return_num_tokens_scored: bool = True,
-            return_num_green_tokens: bool = True,
-            return_green_fraction: bool = True,
-            return_green_token_mask: bool = False,
-            return_z_score: bool = True,
-            return_p_value: bool = True,
+        self,
+        input_ids: Tensor,
+        return_num_tokens_scored: bool = True,
+        return_num_green_tokens: bool = True,
+        return_green_fraction: bool = True,
+        return_green_token_mask: bool = False,
+        return_z_score: bool = True,
+        return_p_value: bool = True,
     ):
         if self.ignore_repeated_bigrams:
             # Method that only counts a green/red hit once per unique bigram.
@@ -193,8 +184,7 @@ class WatermarkDetector(WatermarkBase):
             freq = collections.Counter(token_bigram_generator)
             num_tokens_scored = len(freq.keys())
             for idx, bigram in enumerate(freq.keys()):
-                prefix = torch.tensor([bigram[0]],
-                                      device=self.device)  # expects a 1-d prefix tensor on the randperm device
+                prefix = torch.tensor([bigram[0]], device=self.device)  # expects a 1-d prefix tensor on the randperm device
                 greenlist_ids = self._get_greenlist_ids(prefix)
                 bigram_table[bigram] = True if bigram[1] in greenlist_ids else False
             green_token_count = sum(bigram_table.values())
@@ -243,13 +233,13 @@ class WatermarkDetector(WatermarkBase):
         return score_dict
 
     def detect(
-            self,
-            text: str = None,
-            tokenized_text: list[int] = None,
-            return_prediction: bool = True,
-            return_scores: bool = True,
-            z_threshold: float = None,
-            **kwargs,
+        self,
+        text: str = None,
+        tokenized_text: list[int] = None,
+        return_prediction: bool = True,
+        return_scores: bool = True,
+        z_threshold: float = None,
+        **kwargs,
     ) -> dict:
 
         assert (text is not None) ^ (tokenized_text is not None), "Must pass either the raw or tokenized string"
@@ -268,8 +258,7 @@ class WatermarkDetector(WatermarkBase):
                 "requires an instance of the tokenizer ",
                 "that was used at generation time.",
             )
-            tokenized_text = self.tokenizer(text, return_tensors="pt", add_special_tokens=False)["input_ids"][0].to(
-                self.device)
+            tokenized_text = self.tokenizer(text, return_tensors="pt", add_special_tokens=False)["input_ids"][0].to(self.device)
             if tokenized_text[0] == self.tokenizer.bos_token_id:
                 tokenized_text = tokenized_text[1:]
         else:

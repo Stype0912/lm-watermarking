@@ -66,7 +66,7 @@ def parse_args():
     parser.add_argument(
         "--model_name_or_path",
         type=str,
-        default="opt-125m",
+        default="opt-2.7b",
         help="Main model, path to pretrained model or model identifier from huggingface.co/models.",
     )
     parser.add_argument(
@@ -189,7 +189,6 @@ def load_model(args):
                                                          device_map='auto')
         else:
             model = AutoModelForCausalLM.from_pretrained(args.model_name_or_path)
-            print(model)
     else:
         raise ValueError(f"Unknown model type: {args.model_name_or_path}")
 
@@ -214,8 +213,6 @@ def generate(prompt, args, model=None, device=None, tokenizer=None):
        as a logits processor. """
 
     print(f"Generating with {args}")
-
-    print("vocab:", list(tokenizer.get_vocab().values()))
 
     watermark_processor = WatermarkLogitsProcessor(vocab=list(tokenizer.get_vocab().values()),
                                                    gamma=args.gamma,
@@ -266,9 +263,9 @@ def generate(prompt, args, model=None, device=None, tokenizer=None):
     output_with_watermark = generate_with_watermark(**tokd_input)
 
     if args.is_decoder_only_model:
-    # need to isolate the newly generated tokens
+        # need to isolate the newly generated tokens
         output_without_watermark = output_without_watermark[:, tokd_input["input_ids"].shape[-1]:]
-    output_with_watermark = output_with_watermark[:, tokd_input["input_ids"].shape[-1]:]
+        output_with_watermark = output_with_watermark[:, tokd_input["input_ids"].shape[-1]:]
 
     decoded_output_without_watermark = tokenizer.batch_decode(output_without_watermark, skip_special_tokens=True)[0]
     decoded_output_with_watermark = tokenizer.batch_decode(output_with_watermark, skip_special_tokens=True)[0]
@@ -575,24 +572,19 @@ def run_gradio(args, model=None, device=None, tokenizer=None):
         # State management logic
         # update callbacks that change the state dict
         def update_sampling_temp(session_state, value):
-            session_state.sampling_temp = float(value);
-            return session_state
+            session_state.sampling_temp = float(value); return session_state
 
         def update_generation_seed(session_state, value):
-            session_state.generation_seed = int(value);
-            return session_state
+            session_state.generation_seed = int(value); return session_state
 
         def update_gamma(session_state, value):
-            session_state.gamma = float(value);
-            return session_state
+            session_state.gamma = float(value); return session_state
 
         def update_delta(session_state, value):
-            session_state.delta = float(value);
-            return session_state
+            session_state.delta = float(value); return session_state
 
         def update_detection_z_threshold(session_state, value):
-            session_state.detection_z_threshold = float(value);
-            return session_state
+            session_state.detection_z_threshold = float(value); return session_state
 
         def update_decoding(session_state, value):
             if value == "multinomial":
@@ -614,28 +606,22 @@ def run_gradio(args, model=None, device=None, tokenizer=None):
                 return gr.update(visible=True)
 
         def update_n_beams(session_state, value):
-            session_state.n_beams = value;
-            return session_state
+            session_state.n_beams = value; return session_state
 
         def update_max_new_tokens(session_state, value):
-            session_state.max_new_tokens = int(value);
-            return session_state
+            session_state.max_new_tokens = int(value); return session_state
 
         def update_ignore_repeated_bigrams(session_state, value):
-            session_state.ignore_repeated_bigrams = value;
-            return session_state
+            session_state.ignore_repeated_bigrams = value; return session_state
 
         def update_normalizers(session_state, value):
-            session_state.normalizers = value;
-            return session_state
+            session_state.normalizers = value; return session_state
 
         def update_seed_separately(session_state, value):
-            session_state.seed_separately = value;
-            return session_state
+            session_state.seed_separately = value; return session_state
 
         def update_select_green_tokens(session_state, value):
-            session_state.select_green_tokens = value;
-            return session_state
+            session_state.select_green_tokens = value; return session_state
 
         # registering callbacks for toggling the visibilty of certain parameters
         decoding.change(toggle_sampling_vis, inputs=[decoding], outputs=[sampling_temp])
