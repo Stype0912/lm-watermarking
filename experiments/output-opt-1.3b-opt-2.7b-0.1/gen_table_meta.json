@@ -14,7 +14,7 @@
     "output_filtering_strategy": "no_filter",
     "initial_seed": 1234,
     "dynamic_seed": "markov_1",
-    "bl_proportion": 0.25,
+    "bl_proportion": 0.1,
     "bl_logit_bias": 1.0,
     "bl_type": "soft",
     "num_beams": 1,
@@ -25,7 +25,7 @@
     "wandb_project": "lm-blacklisting",
     "wandb_entity": "jwkirchenbauer",
     "run_name": null,
-    "output_dir": "./output-opt-1.3b-opt-2.7b-0.25",
+    "output_dir": "./output-opt-1.3b-opt-2.7b-0.1",
     "load_prev_generations": false,
     "store_bl_ids": false,
     "store_spike_ents": false,
@@ -33,5 +33,5 @@
     "sampling_temp": 0.7,
     "generate_only": false,
     "all_gas_no_eos": false,
-    "gen_table_already_existed": true
+    "gen_table_already_existed": false
 }
