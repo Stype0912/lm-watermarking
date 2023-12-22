@@ -1,0 +1,6 @@
+baseline avg PPL: 9.801730835437775
+baseline avg loss: 2.213708978891373
+no_bl avg PPL: 2.943924164772034
+no_bl avg loss: 1.026605672389269
+w_bl avg PPL: 2.534447491168976
+w_bl avg loss: 0.9073020845651627

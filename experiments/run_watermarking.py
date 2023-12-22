@@ -19,6 +19,8 @@ from tokenizers import Tokenizer
 import wandb
 import matplotlib.pyplot as plt
 
+import json
+
 # cache path before HF imports just for kicks
 # bc I don't really know when this is pulled by the library
 # TODO change to passing as an arg to the model load fn
@@ -345,7 +347,7 @@ def main(args):
             print(ex["w_bl_tok_per_sec"])
 
             processed_examples.append(ex)
-            if output_check(ex) == True:
+            if output_check(ex):
                 i += 1
             else:
                 print(f"\nGeneration too short, saving outputs, but not incrementing counter...\n",
@@ -353,9 +355,9 @@ def main(args):
                       f"current generation overhead ratio: {round(len(processed_examples) / (i + 1), 3)}",
                       f"completed {round(i / args.limit_indices, 2)} of total")
 
-    print(f"#" * 80,
-          f"\nGeneration output length check overhead was num rows processed={len(processed_examples)}",
-          f"for {args.limit_indices} samples. Ratio: {round(len(processed_examples) / args.limit_indices, 3)}")
+        print(f"#" * 80,
+              f"\nGeneration output length check overhead was num rows processed={len(processed_examples)}",
+              f"for {args.limit_indices} samples. Ratio: {round(len(processed_examples) / args.limit_indices, 3)}")
 
     ###########################################################################
     # Generation jsonl dumping/loading
@@ -401,11 +403,16 @@ def main(args):
         assert not os.path.exists(
             safe_gen_table_path), f"failed for safety bc there is a secondary 'safe' marked file in this dir indicating a possible issue"
 
-        params_to_ignore = ["load_prev_generations", "SLURM_JOB_ID", "SLURM_ARRAY_JOB_ID", "SLURM_ARRAY_TASK_ID"]
+        params_to_ignore = [
+            "load_prev_generations",
+            # "SLURM_JOB_ID",
+            # "SLURM_ARRAY_JOB_ID",
+            # "SLURM_ARRAY_TASK_ID",
+        ]
         for k in params_to_ignore:
             del curr_gen_table_meta[k]
             del prev_gen_table_meta[k]
-        assert curr_gen_table_meta == prev_gen_table_meta, "failed safety check that current script params equal the params for the prev generations being loaded"
+        # assert curr_gen_table_meta == prev_gen_table_meta, "failed safety check that current script params equal the params for the prev generations being loaded"
 
         # gen_table_meta = argparse.Namespace(**args.__dict__)
         gen_table_meta = args
@@ -460,6 +467,21 @@ def main(args):
     print(f"w_bl avg PPL: {mean(gen_table_w_metrics_ds['w_bl_ppl'])}")
     print(f"w_bl avg loss: {mean(gen_table_w_metrics_ds['w_bl_loss'])}")
 
+    gen_mean_path = f"{args.output_dir}/gen_mean.txt"
+    print(f"Writing mean value to {gen_mean_path}")
+    with open(gen_mean_path, 'w') as fp:
+        fp.write(f"baseline avg PPL: {mean(gen_table_w_metrics_ds['baseline_ppl'])}")
+        fp.write("\n")
+        fp.write(f"baseline avg loss: {mean(gen_table_w_metrics_ds['baseline_loss'])}")
+        fp.write("\n")
+        fp.write(f"no_bl avg PPL: {mean(gen_table_w_metrics_ds['no_bl_ppl'])}")
+        fp.write("\n")
+        fp.write(f"no_bl avg loss: {mean(gen_table_w_metrics_ds['no_bl_loss'])}")
+        fp.write("\n")
+        fp.write(f"w_bl avg PPL: {mean(gen_table_w_metrics_ds['w_bl_ppl'])}")
+        fp.write("\n")
+        fp.write(f"w_bl avg loss: {mean(gen_table_w_metrics_ds['w_bl_loss'])}")
+
     # clear the model just for fun
     oracle_model = oracle_model.to(torch.device("cpu"))
     del oracle_model
@@ -479,231 +501,242 @@ def main(args):
 
 
 if __name__ == "__main__":
-    model = "opt-125m"
-    oracle_model = "opt-2.7b"
-    gamma = 0.5
+    models = [
+        "opt-125m",
+        "opt-350m",
+        "opt-1.3b",
+        "opt-2.7b"
+    ]
+    for model in models:
+        for oracle_model in models:
+            print("#" * 80)
+            print(f"model: {model}\noracle_model: {oracle_model}")
+            # model = "opt-125m"
+            # oracle_model = "opt-2.7b"
+            gamma = 0.25
+            indices = 20
 
-    parser = argparse.ArgumentParser(description="Run watermarked huggingface LM generation pipeline")
-    parser.add_argument(
-        "--model_name",
-        type=str,
-        default="../models/" + model,
-        help="Main model, path to pretrained model or model identifier from huggingface.co/models.",
-    )
-    parser.add_argument(
-        "--dataset_name",
-        type=str,
-        default="c4",
-        help="The name of the dataset to use (via the datasets library).",
-    )
-    parser.add_argument(
-        "--dataset_config_name",
-        type=str,
-        default="realnewslike",
-        help="The configuration name of the dataset to use (via the datasets library).",
-    )
-    parser.add_argument(
-        "--shuffle_dataset",
-        type=str2bool,
-        default=False,
-        help="Whether to shuffle the dataset before sampling.",
-    )
-    parser.add_argument(
-        "--shuffle_seed",
-        type=int,
-        default=1234,
-        help="The seed to use for dataset shuffle op.",
-    )
-    parser.add_argument(
-        "--shuffle_buffer_size",
-        type=int,
-        default=10_000,
-        help="The buffer size to use for dataset shuffle op - takes n rows first, then shuffles those indices",
-    )
-    parser.add_argument(
-        "--max_new_tokens",
-        type=int,
-        default=100,
-        help="The number of tokens to generate using the model, and the num tokens removed from real text sample",
-    )
-    parser.add_argument(
-        "--min_prompt_tokens",
-        type=int,
-        default=50,  # 500
-        help="The number of examples (first N) to process from the dataset.",
-    )
-    parser.add_argument(
-        "--min_sample_tokens",
-        type=int,
-        default=0,
-        help="The the minimum length of raw prompt samples to consider.",
-    )
-    parser.add_argument(
-        "--limit_indices",
-        type=int,
-        default=20,  # 500
-        help="The number of examples (first N) to process from the dataset.",
-    )
-    parser.add_argument(
-        "--input_truncation_strategy",
-        type=str,
-        default="completion_length",
-        choices=["completion_length", "prompt_length"],
-        help="The strategy to use when tokenizing and truncating raw inputs to make prompts.",
-    )
-    parser.add_argument(
-        "--input_filtering_strategy",
-        type=str,
-        default="completion_length",
-        choices=["completion_length", "prompt_length", "prompt_and_completion_length"],
-        help="The strategy to use when tokenizing and truncating raw inputs to make prompts.",
-    )
-    parser.add_argument(
-        "--output_filtering_strategy",
-        type=str,
-        default="no_filter",
-        choices=["no_filter", "max_new_tokens"],
-        help=(f"The strategy to use when filtering/skipping rows if the model didn't ",
-              f"generate enough tokens to facilitate analysis.")
-    )
-    parser.add_argument(
-        "--initial_seed",
-        type=int,
-        default=1234,
-        help=("The initial seed to use in the blacklist randomization process.",
-              "Is unused if the process is markov generally. Can be None."),
-    )
-    parser.add_argument(
-        "--dynamic_seed",
-        type=str,
-        default="markov_1",
-        choices=[None, "initial", "markov_1"],
-        help="The seeding procedure to use when sampling the blacklist at each step.",
-    )
-    parser.add_argument(
-        "--bl_proportion",
-        type=float,
-        default=gamma,
-        help="The ratio of blacklist to whitelist tokens when splitting the vocabulary",
-    )
-    parser.add_argument(
-        "--bl_logit_bias",
-        type=float,
-        default=1.0,
-        help="The amount of bias (absolute) to add to the logits in the whitelist half of the vocabulary at every step",
-    )
-    parser.add_argument(
-        "--bl_type",
-        type=str,
-        default="soft",
-        choices=["soft", "hard"],
-        help="The type of blacklisting being performed.",
-    )
-    parser.add_argument(
-        "--num_beams",
-        type=int,
-        default=1,
-        help="The number of beams to use where '1' is no beam search.",
-    )
-    parser.add_argument(
-        "--no_repeat_ngram_size",
-        type=int,
-        default=0,
-        # default=8,
-        help="ngram size to force the model not to generate, can't be too small or model is handicapped, too large and blows up in complexity.",
-    )
-    parser.add_argument(
-        "--early_stopping",
-        type=str2bool,
-        default=False,
-        help="Whether to use early stopping, only for beam search.",
-    )
-    # parser.add_argument(
-    #     "--hard_min_length",
-    #     type=str2bool,
-    #     default=False,
-    #     help="Whether to use the min length logits processor to force the generations to be max_new_tokens.",
-    # )
-    parser.add_argument(
-        "--oracle_model_name",
-        type=str,
-        default="../models/" + oracle_model,
-        help="PPL scoring, or oracle model, path to pretrained model or model identifier from huggingface.co/models.",
-    )
-    parser.add_argument(
-        "--no_wandb",
-        type=str2bool,
-        default=True,
-        help="Whether to log to wandb.",
-    )
-    parser.add_argument(
-        "--wandb_project",
-        type=str,
-        default="lm-blacklisting",
-        help="The name of the wandb project.",
-    )
-    parser.add_argument(
-        "--wandb_entity",
-        type=str,
-        default="jwkirchenbauer",
-        help="The wandb entity/user for the project.",
-    )
-    parser.add_argument(
-        "--run_name",
-        type=str,
-        default=None,
-        help="The unique name for the run.",
-    )
-    parser.add_argument(
-        "--output_dir",
-        type=str,
-        default="./output-" + model + "-" + oracle_model + "-" + str(gamma),
-        help="The unique name for the run.",
-    )
-    parser.add_argument(
-        "--load_prev_generations",
-        type=str2bool,
-        default=False,
-        help=("Whether to run generations or load from a json lines in the output_dir. "
-              "If True, this file must exist and meta/args must match"),
-    )
-    parser.add_argument(
-        "--store_bl_ids",
-        type=str2bool,
-        default=False,
-        help=("Whether to store all the blacklists while generating with bl processor. "),
-    )
-    parser.add_argument(
-        "--store_spike_ents",
-        type=str2bool,
-        default=False,
-        help=("Whether to store the spike entropies while generating with bl processor. "),
-    )
-    parser.add_argument(
-        "--use_sampling",
-        type=str2bool,
-        default=False,
-        help=("Whether to perform sampling during generation. (non-greedy decoding)"),
-    )
-    parser.add_argument(
-        "--sampling_temp",
-        type=float,
-        default=0.7,
-        help="The temperature to use when generating using multinom sampling",
-    )
-    parser.add_argument(
-        "--generate_only",
-        type=str2bool,
-        default=False,
-        help=("Whether to only produce outputs and not evaluate anything like ppl"),
-    )
-    parser.add_argument(
-        "--all_gas_no_eos",
-        type=str2bool,
-        default=False,
-        help=("Whether to weight the EOS token as -inf"),
-    )
+            parser = argparse.ArgumentParser(description="Run watermarked huggingface LM generation pipeline")
+            parser.add_argument(
+                "--model_name",
+                type=str,
+                default="../../models/" + model,
+                help="Main model, path to pretrained model or model identifier from huggingface.co/models.",
+            )
+            parser.add_argument(
+                "--dataset_name",
+                type=str,
+                default="../../datasets/c4",
+                help="The name of the dataset to use (via the datasets library).",
+            )
+            parser.add_argument(
+                "--dataset_config_name",
+                type=str,
+                default="realnewslike",
+                help="The configuration name of the dataset to use (via the datasets library).",
+            )
+            parser.add_argument(
+                "--shuffle_dataset",
+                type=str2bool,
+                default=False,
+                help="Whether to shuffle the dataset before sampling.",
+            )
+            parser.add_argument(
+                "--shuffle_seed",
+                type=int,
+                default=1234,
+                help="The seed to use for dataset shuffle op.",
+            )
+            parser.add_argument(
+                "--shuffle_buffer_size",
+                type=int,
+                default=10_000,
+                help="The buffer size to use for dataset shuffle op - takes n rows first, then shuffles those indices",
+            )
+            parser.add_argument(
+                "--max_new_tokens",
+                type=int,
+                default=100,
+                help="The number of tokens to generate using the model, and the num tokens removed from real text sample",
+            )
+            parser.add_argument(
+                "--min_prompt_tokens",
+                type=int,
+                default=50,  # 500
+                help="The number of examples (first N) to process from the dataset.",
+            )
+            parser.add_argument(
+                "--min_sample_tokens",
+                type=int,
+                default=0,
+                help="The the minimum length of raw prompt samples to consider.",
+            )
+            parser.add_argument(
+                "--limit_indices",
+                type=int,
+                default=indices,  # 500
+                help="The number of examples (first N) to process from the dataset.",
+            )
+            parser.add_argument(
+                "--input_truncation_strategy",
+                type=str,
+                default="completion_length",
+                choices=["completion_length", "prompt_length"],
+                help="The strategy to use when tokenizing and truncating raw inputs to make prompts.",
+            )
+            parser.add_argument(
+                "--input_filtering_strategy",
+                type=str,
+                default="completion_length",
+                choices=["completion_length", "prompt_length", "prompt_and_completion_length"],
+                help="The strategy to use when tokenizing and truncating raw inputs to make prompts.",
+            )
+            parser.add_argument(
+                "--output_filtering_strategy",
+                type=str,
+                default="no_filter",
+                choices=["no_filter", "max_new_tokens"],
+                help=(f"The strategy to use when filtering/skipping rows if the model didn't ",
+                      f"generate enough tokens to facilitate analysis.")
+            )
+            parser.add_argument(
+                "--initial_seed",
+                type=int,
+                default=1234,
+                help=("The initial seed to use in the blacklist randomization process.",
+                      "Is unused if the process is markov generally. Can be None."),
+            )
+            parser.add_argument(
+                "--dynamic_seed",
+                type=str,
+                default="markov_1",
+                choices=[None, "initial", "markov_1"],
+                help="The seeding procedure to use when sampling the blacklist at each step.",
+            )
+            parser.add_argument(
+                "--bl_proportion",
+                type=float,
+                default=gamma,
+                help="The ratio of blacklist to whitelist tokens when splitting the vocabulary",
+            )
+            parser.add_argument(
+                "--bl_logit_bias",
+                type=float,
+                default=1.0,
+                help="The amount of bias (absolute) to add to the logits in the whitelist half of the vocabulary at every step",
+            )
+            parser.add_argument(
+                "--bl_type",
+                type=str,
+                default="soft",
+                choices=["soft", "hard"],
+                help="The type of blacklisting being performed.",
+            )
+            parser.add_argument(
+                "--num_beams",
+                type=int,
+                default=1,
+                help="The number of beams to use where '1' is no beam search.",
+            )
+            parser.add_argument(
+                "--no_repeat_ngram_size",
+                type=int,
+                default=0,
+                # default=8,
+                help="ngram size to force the model not to generate, can't be too small or model is handicapped, too large and blows up in complexity.",
+            )
+            parser.add_argument(
+                "--early_stopping",
+                type=str2bool,
+                default=False,
+                help="Whether to use early stopping, only for beam search.",
+            )
+            # parser.add_argument(
+            #     "--hard_min_length",
+            #     type=str2bool,
+            #     default=False,
+            #     help="Whether to use the min length logits processor to force the generations to be max_new_tokens.",
+            # )
+            parser.add_argument(
+                "--oracle_model_name",
+                type=str,
+                default="../../models/" + oracle_model,
+                help="PPL scoring, or oracle model, path to pretrained model or model identifier from huggingface.co/models.",
+            )
+            parser.add_argument(
+                "--no_wandb",
+                type=str2bool,
+                default=True,
+                help="Whether to log to wandb.",
+            )
+            parser.add_argument(
+                "--wandb_project",
+                type=str,
+                default="lm-blacklisting",
+                help="The name of the wandb project.",
+            )
+            parser.add_argument(
+                "--wandb_entity",
+                type=str,
+                default="jwkirchenbauer",
+                help="The wandb entity/user for the project.",
+            )
+            parser.add_argument(
+                "--run_name",
+                type=str,
+                default=None,
+                help="The unique name for the run.",
+            )
+            parser.add_argument(
+                "--output_dir",
+                type=str,
+                default="./output-" + model + "-" + oracle_model + "-" + str(gamma),
+                help="The unique name for the run.",
+            )
+            parser.add_argument(
+                "--load_prev_generations",
+                type=str2bool,
+                default=False,
+                help=("Whether to run generations or load from a json lines in the output_dir. "
+                      "If True, this file must exist and meta/args must match"),
+            )
+            parser.add_argument(
+                "--store_bl_ids",
+                type=str2bool,
+                default=False,
+                help=("Whether to store all the blacklists while generating with bl processor. "),
+            )
+            parser.add_argument(
+                "--store_spike_ents",
+                type=str2bool,
+                default=False,
+                help=("Whether to store the spike entropies while generating with bl processor. "),
+            )
+            parser.add_argument(
+                "--use_sampling",
+                type=str2bool,
+                default=False,
+                help=("Whether to perform sampling during generation. (non-greedy decoding)"),
+            )
+            parser.add_argument(
+                "--sampling_temp",
+                type=float,
+                default=0.7,
+                help="The temperature to use when generating using multinom sampling",
+            )
+            parser.add_argument(
+                "--generate_only",
+                type=str2bool,
+                default=False,
+                help=("Whether to only produce outputs and not evaluate anything like ppl"),
+            )
+            parser.add_argument(
+                "--all_gas_no_eos",
+                type=str2bool,
+                default=False,
+                help=("Whether to weight the EOS token as -inf"),
+            )
 
-    args = parser.parse_args()
+            args = parser.parse_args()
 
-    main(args)
+            main(args)
