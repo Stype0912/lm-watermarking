@@ -29,6 +29,10 @@ from nltk.util import ngrams
 
 from normalizers import normalization_strategy_lookup
 
+from Crypto.PublicKey import ECC
+from Crypto.Hash import SHA256
+from Crypto.Signature import DSS
+
 
 class WatermarkBase:
     def __init__(
@@ -39,6 +43,7 @@ class WatermarkBase:
         seeding_scheme: str = "simple_1",  # mostly unused/always default
         hash_key: int = 15485863,  # just a large prime number to create a rng seed with sufficient bit width
         select_green_tokens: bool = True,
+        signature: str = "",
     ):
 
         # watermarking parameters
@@ -50,6 +55,8 @@ class WatermarkBase:
         self.rng = None
         self.hash_key = hash_key
         self.select_green_tokens = select_green_tokens
+        self.signature = ""
+        self.key = ECC.generate(curve='P-192')
 
     def _seed_rng(self, input_ids: torch.LongTensor, seeding_scheme: str = None) -> None:
         # can optionally override the seeding scheme,
@@ -96,6 +103,21 @@ class WatermarkLogitsProcessor(WatermarkBase, LogitsProcessor):
         return scores
 
     def __call__(self, input_ids: torch.LongTensor, scores: torch.FloatTensor) -> torch.FloatTensor:
+        if len(self.signature) == 0:
+            if len(input_ids[0]) < 10:
+                pass
+            else:
+                # 待签名内容(发送的文本内容)
+                message = 'I am MKing Hello Everyone'
+                # 签名
+                signer = DSS.new(self.key, 'fips-186-3')
+                hasher = SHA256.new(message.encode())  # Hash对象，取内容摘要
+                # hasher.update(message.encode()) # 换种方式使用也可以
+                sign_obj = signer.sign(hasher)  # 用私钥对消息签名
+                print('签名内容：', sign_obj)
+                self.signature = bin(int.from_bytes(sign_obj, byteorder='little', signed=False))[2:]
+        else:
+            self.signature = self.signature[1:]
 
         # this is lazy to allow us to colocate on the watermarked model's device
         if self.rng is None:

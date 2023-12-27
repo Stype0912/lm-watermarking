@@ -66,7 +66,7 @@ def parse_args():
     parser.add_argument(
         "--model_name_or_path",
         type=str,
-        default="opt-2.7b",
+        default="opt-125m",
         help="Main model, path to pretrained model or model identifier from huggingface.co/models.",
     )
     parser.add_argument(
@@ -78,7 +78,7 @@ def parse_args():
     parser.add_argument(
         "--max_new_tokens",
         type=int,
-        default=200,
+        default=1000,
         help="Maximmum number of new tokens to generate.",
     )
     parser.add_argument(
