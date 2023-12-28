@@ -159,7 +159,8 @@ def load_all_datasets(run_names: list[str]=None,
                                                     bl_logit_bias=args.bl_logit_bias,
                                                     bl_type=args.bl_type, 
                                                     initial_seed= args.initial_seed, 
-                                                    dynamic_seed=args.dynamic_seed)
+                                                    dynamic_seed=args.dynamic_seed,
+                                                    signature="")
             
             if "spike_entropies" in gen_table_w_bl_metrics.column_names:
                 comp_exp_num_wl = partial(

@@ -44,6 +44,7 @@ class WatermarkBase:
         hash_key: int = 15485863,  # just a large prime number to create a rng seed with sufficient bit width
         select_green_tokens: bool = True,
         signature: str = "",
+        need_sig: bool = True,
     ):
 
         # watermarking parameters
@@ -57,6 +58,7 @@ class WatermarkBase:
         self.select_green_tokens = select_green_tokens
         self.signature = ""
         self.key = ECC.generate(curve='P-192')
+        self.need_sig = need_sig
 
     def _seed_rng(self, input_ids: torch.LongTensor, seeding_scheme: str = None) -> None:
         # can optionally override the seeding scheme,
@@ -65,7 +67,8 @@ class WatermarkBase:
             seeding_scheme = self.seeding_scheme
 
         if seeding_scheme == "simple_1":
-            assert input_ids.shape[-1] >= 1, f"seeding_scheme={seeding_scheme} requires at least a 1 token prefix sequence to seed rng"
+            assert input_ids.shape[
+                       -1] >= 1, f"seeding_scheme={seeding_scheme} requires at least a 1 token prefix sequence to seed rng"
             prev_token = input_ids[-1].item()
             self.rng.manual_seed(self.hash_key * prev_token)
         else:
@@ -82,7 +85,7 @@ class WatermarkBase:
         if self.select_green_tokens:  # directly
             greenlist_ids = vocab_permutation[:greenlist_size]  # new
         else:  # select green via red
-            greenlist_ids = vocab_permutation[(self.vocab_size - greenlist_size) :]  # legacy behavior
+            greenlist_ids = vocab_permutation[(self.vocab_size - greenlist_size):]  # legacy behavior
         return greenlist_ids
 
 
@@ -98,26 +101,28 @@ class WatermarkLogitsProcessor(WatermarkBase, LogitsProcessor):
         final_mask = green_tokens_mask.bool()
         return final_mask
 
-    def _bias_greenlist_logits(self, scores: torch.Tensor, greenlist_mask: torch.Tensor, greenlist_bias: float) -> torch.Tensor:
+    def _bias_greenlist_logits(self, scores: torch.Tensor, greenlist_mask: torch.Tensor,
+                               greenlist_bias: float) -> torch.Tensor:
         scores[greenlist_mask] = scores[greenlist_mask] + greenlist_bias
         return scores
 
     def __call__(self, input_ids: torch.LongTensor, scores: torch.FloatTensor) -> torch.FloatTensor:
-        if len(self.signature) == 0:
-            if len(input_ids[0]) < 10:
-                pass
+        if self.need_sig:
+            if len(self.signature) == 0:
+                if len(input_ids[0]) < 10:
+                    pass
+                else:
+                    # 待签名内容(发送的文本内容)
+                    message = 'I am MKing Hello Everyone'
+                    # 签名
+                    signer = DSS.new(self.key, 'fips-186-3')
+                    hasher = SHA256.new(message.encode())  # Hash对象，取内容摘要
+                    # hasher.update(message.encode()) # 换种方式使用也可以
+                    sign_obj = signer.sign(hasher)  # 用私钥对消息签名
+                    print('签名内容：', sign_obj)
+                    self.signature = bin(int.from_bytes(sign_obj, byteorder='little', signed=False))[2:]
             else:
-                # 待签名内容(发送的文本内容)
-                message = 'I am MKing Hello Everyone'
-                # 签名
-                signer = DSS.new(self.key, 'fips-186-3')
-                hasher = SHA256.new(message.encode())  # Hash对象，取内容摘要
-                # hasher.update(message.encode()) # 换种方式使用也可以
-                sign_obj = signer.sign(hasher)  # 用私钥对消息签名
-                print('签名内容：', sign_obj)
-                self.signature = bin(int.from_bytes(sign_obj, byteorder='little', signed=False))[2:]
-        else:
-            self.signature = self.signature[1:]
+                self.signature = self.signature[1:]
 
         # this is lazy to allow us to colocate on the watermarked model's device
         if self.rng is None:
@@ -140,14 +145,14 @@ class WatermarkLogitsProcessor(WatermarkBase, LogitsProcessor):
 
 class WatermarkDetector(WatermarkBase):
     def __init__(
-        self,
-        *args,
-        device: torch.device = None,
-        tokenizer: Tokenizer = None,
-        z_threshold: float = 4.0,
-        normalizers: list[str] = ["unicode"],  # or also: ["unicode", "homoglyphs", "truecase"]
-        ignore_repeated_bigrams: bool = True,
-        **kwargs,
+            self,
+            *args,
+            device: torch.device = None,
+            tokenizer: Tokenizer = None,
+            z_threshold: float = 4.0,
+            normalizers: list[str] = ["unicode"],  # or also: ["unicode", "homoglyphs", "truecase"]
+            ignore_repeated_bigrams: bool = True,
+            **kwargs,
     ):
         super().__init__(*args, **kwargs)
         # also configure the metrics returned/preprocessing options
@@ -185,14 +190,14 @@ class WatermarkDetector(WatermarkBase):
         return p_value
 
     def _score_sequence(
-        self,
-        input_ids: Tensor,
-        return_num_tokens_scored: bool = True,
-        return_num_green_tokens: bool = True,
-        return_green_fraction: bool = True,
-        return_green_token_mask: bool = False,
-        return_z_score: bool = True,
-        return_p_value: bool = True,
+            self,
+            input_ids: Tensor,
+            return_num_tokens_scored: bool = True,
+            return_num_green_tokens: bool = True,
+            return_green_fraction: bool = True,
+            return_green_token_mask: bool = False,
+            return_z_score: bool = True,
+            return_p_value: bool = True,
     ):
         if self.ignore_repeated_bigrams:
             # Method that only counts a green/red hit once per unique bigram.
@@ -206,7 +211,8 @@ class WatermarkDetector(WatermarkBase):
             freq = collections.Counter(token_bigram_generator)
             num_tokens_scored = len(freq.keys())
             for idx, bigram in enumerate(freq.keys()):
-                prefix = torch.tensor([bigram[0]], device=self.device)  # expects a 1-d prefix tensor on the randperm device
+                prefix = torch.tensor([bigram[0]],
+                                      device=self.device)  # expects a 1-d prefix tensor on the randperm device
                 greenlist_ids = self._get_greenlist_ids(prefix)
                 bigram_table[bigram] = True if bigram[1] in greenlist_ids else False
             green_token_count = sum(bigram_table.values())
@@ -255,13 +261,13 @@ class WatermarkDetector(WatermarkBase):
         return score_dict
 
     def detect(
-        self,
-        text: str = None,
-        tokenized_text: list[int] = None,
-        return_prediction: bool = True,
-        return_scores: bool = True,
-        z_threshold: float = None,
-        **kwargs,
+            self,
+            text: str = None,
+            tokenized_text: list[int] = None,
+            return_prediction: bool = True,
+            return_scores: bool = True,
+            z_threshold: float = None,
+            **kwargs,
     ) -> dict:
 
         assert (text is not None) ^ (tokenized_text is not None), "Must pass either the raw or tokenized string"
@@ -280,7 +286,8 @@ class WatermarkDetector(WatermarkBase):
                 "requires an instance of the tokenizer ",
                 "that was used at generation time.",
             )
-            tokenized_text = self.tokenizer(text, return_tensors="pt", add_special_tokens=False)["input_ids"][0].to(self.device)
+            tokenized_text = self.tokenizer(text, return_tensors="pt", add_special_tokens=False)["input_ids"][0].to(
+                self.device)
             if tokenized_text[0] == self.tokenizer.bos_token_id:
                 tokenized_text = tokenized_text[1:]
         else:
