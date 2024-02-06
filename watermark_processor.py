@@ -29,6 +29,8 @@ from nltk.util import ngrams
 
 from normalizers import normalization_strategy_lookup
 
+import torch.nn.functional as F
+
 
 class WatermarkBase:
     def __init__(
@@ -50,6 +52,8 @@ class WatermarkBase:
         self.rng = None
         self.hash_key = hash_key
         self.select_green_tokens = select_green_tokens
+        self.correct_chosen = 0
+        self.incorrect_chosen = 0
 
     def _seed_rng(self, input_ids: torch.LongTensor, seeding_scheme: str = None) -> None:
         # can optionally override the seeding scheme,
@@ -92,7 +96,15 @@ class WatermarkLogitsProcessor(WatermarkBase, LogitsProcessor):
         return final_mask
 
     def _bias_greenlist_logits(self, scores: torch.Tensor, greenlist_mask: torch.Tensor, greenlist_bias: float) -> torch.Tensor:
+        green = scores[greenlist_mask]
         scores[greenlist_mask] = scores[greenlist_mask] + greenlist_bias
+        biased_scores = F.softmax(scores, dim=1)
+        index = torch.argmax(biased_scores)
+        # print(greenlist_mask[0][index])
+        if greenlist_mask[0][index]:
+            self.correct_chosen += 1
+        else:
+            self.incorrect_chosen += 1
         return scores
 
     def __call__(self, input_ids: torch.LongTensor, scores: torch.FloatTensor) -> torch.FloatTensor:

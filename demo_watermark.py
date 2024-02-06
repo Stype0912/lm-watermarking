@@ -16,6 +16,8 @@
 
 import os
 import argparse
+import random
+import sys
 from argparse import Namespace
 from pprint import pprint
 from functools import partial
@@ -63,7 +65,7 @@ def parse_args():
     parser.add_argument(
         "--model_name_or_path",
         type=str,
-        default="facebook/opt-6.7b",
+        default="../models/opt-1.3b",
         help="Main model, path to pretrained model or model identifier from huggingface.co/models.",
     )
     parser.add_argument(
@@ -81,7 +83,7 @@ def parse_args():
     parser.add_argument(
         "--generation_seed",
         type=int,
-        default=123,
+        default=random.randint(0, sys.maxsize),
         help="Seed for setting the torch global rng prior to generation.",
     )
     parser.add_argument(
@@ -123,7 +125,7 @@ def parse_args():
     parser.add_argument(
         "--delta",
         type=float,
-        default=2.0,
+        default=1.0,
         help="The amount/bias to add to each of the greenlist token logits before each token sampling step.",
     )
     parser.add_argument(
@@ -188,9 +190,9 @@ def load_model(args):
 
     if args.use_gpu:
         device = "cuda" if torch.cuda.is_available() else "cpu"
-        if args.load_fp16: 
+        if args.load_fp16:
             pass
-        else: 
+        else:
             model = model.to(device)
     else:
         device = "cpu"
@@ -204,7 +206,7 @@ def generate(prompt, args, model=None, device=None, tokenizer=None):
     """Instatiate the WatermarkLogitsProcessor according to the watermark parameters
        and generate watermarked text by passing it to the generate method of the model
        as a logits processor. """
-    
+
     print(f"Generating with {args}")
 
     watermark_processor = WatermarkLogitsProcessor(vocab=list(tokenizer.get_vocab().values()),
@@ -217,7 +219,7 @@ def generate(prompt, args, model=None, device=None, tokenizer=None):
 
     if args.use_sampling:
         gen_kwargs.update(dict(
-            do_sample=True, 
+            do_sample=True,
             top_k=0,
             temperature=args.sampling_temp
         ))
@@ -226,13 +228,13 @@ def generate(prompt, args, model=None, device=None, tokenizer=None):
             num_beams=args.n_beams
         ))
 
-    generate_without_watermark = partial(
-        model.generate,
-        **gen_kwargs
-    )
+    # generate_without_watermark = partial(
+    #     model.generate,
+    #     **gen_kwargs
+    # )
     generate_with_watermark = partial(
         model.generate,
-        logits_processor=LogitsProcessorList([watermark_processor]), 
+        logits_processor=LogitsProcessorList([watermark_processor]),
         **gen_kwargs
     )
     if args.prompt_max_length:
@@ -247,26 +249,32 @@ def generate(prompt, args, model=None, device=None, tokenizer=None):
     redecoded_input = tokenizer.batch_decode(tokd_input["input_ids"], skip_special_tokens=True)[0]
 
     torch.manual_seed(args.generation_seed)
-    output_without_watermark = generate_without_watermark(**tokd_input)
+    # output_without_watermark = generate_without_watermark(**tokd_input)
 
     # optional to seed before second generation, but will not be the same again generally, unless delta==0.0, no-op watermark
-    if args.seed_separately: 
+    if args.seed_separately:
         torch.manual_seed(args.generation_seed)
     output_with_watermark = generate_with_watermark(**tokd_input)
 
-    if args.is_decoder_only_model:
+    # if args.is_decoder_only_model:
         # need to isolate the newly generated tokens
-        output_without_watermark = output_without_watermark[:,tokd_input["input_ids"].shape[-1]:]
-        output_with_watermark = output_with_watermark[:,tokd_input["input_ids"].shape[-1]:]
+        # output_without_watermark = output_without_watermark[:,tokd_input["input_ids"].shape[-1]:]
+        # output_with_watermark = output_with_watermark[:,tokd_input["input_ids"].shape[-1]:]
 
-    decoded_output_without_watermark = tokenizer.batch_decode(output_without_watermark, skip_special_tokens=True)[0]
+    # decoded_output_without_watermark = tokenizer.batch_decode(output_without_watermark, skip_special_tokens=True)[0]
     decoded_output_with_watermark = tokenizer.batch_decode(output_with_watermark, skip_special_tokens=True)[0]
 
+    correct_chosen, incorrect_chosen = watermark_processor.correct_chosen, watermark_processor.incorrect_chosen
+    delta = watermark_processor.delta
+    print("delta: ", delta)
+    print(correct_chosen, incorrect_chosen)
+    print(correct_chosen / (correct_chosen + incorrect_chosen))
+    print()
     return (redecoded_input,
             int(truncation_warning),
-            decoded_output_without_watermark, 
+            # decoded_output_without_watermark,
             decoded_output_with_watermark,
-            args) 
+            args)
             # decoded_output_with_watermark)
 
 def format_names(s):
@@ -285,15 +293,15 @@ def list_format_scores(score_dict, detection_threshold):
     lst_2d = []
     # lst_2d.append(["z-score threshold", f"{detection_threshold}"])
     for k,v in score_dict.items():
-        if k=='green_fraction': 
+        if k=='green_fraction':
             lst_2d.append([format_names(k), f"{v:.1%}"])
-        elif k=='confidence': 
+        elif k=='confidence':
             lst_2d.append([format_names(k), f"{v:.3%}"])
-        elif isinstance(v, float): 
+        elif isinstance(v, float):
             lst_2d.append([format_names(k), f"{v:.3g}"])
         elif isinstance(v, bool):
             lst_2d.append([format_names(k), ("Watermarked" if v else "Human/Unwatermarked")])
-        else: 
+        else:
             lst_2d.append([format_names(k), f"{v}"])
     if "confidence" in score_dict:
         lst_2d.insert(-2,["z-score Threshold", f"{detection_threshold}"])
@@ -386,7 +394,7 @@ def run_gradio(args, model=None, device=None, tokenizer=None):
         session_args = gr.State(value=args)
 
         with gr.Tab("Generate and Detect"):
-            
+
             with gr.Row():
                 prompt = gr.Textbox(label=f"Prompt", interactive=True,lines=10,max_lines=10, value=default_prompt)
             with gr.Row():
@@ -409,9 +417,9 @@ def run_gradio(args, model=None, device=None, tokenizer=None):
             def truncate_prompt(redecoded_input, truncation_warning, orig_prompt, args):
                 if truncation_warning:
                     return redecoded_input + f"\n\n[Prompt was truncated before generation due to length...]", args
-                else: 
+                else:
                     return orig_prompt, args
-        
+
         with gr.Tab("Detector Only"):
             with gr.Row():
                 with gr.Column(scale=2):
@@ -462,7 +470,7 @@ def run_gradio(args, model=None, device=None, tokenizer=None):
                         seed_separately = gr.Checkbox(label="Seed both generations separately", value=args.seed_separately)
                     with gr.Column(scale=1):
                         select_green_tokens = gr.Checkbox(label="Select 'greenlist' from partition", value=args.select_green_tokens)
-        
+
         with gr.Accordion("Understanding the settings",open=False):
             gr.Markdown(
             """
@@ -514,7 +522,7 @@ def run_gradio(args, model=None, device=None, tokenizer=None):
                                 See the paper for a detailed discussion of input normalization. 
             """
             )
-        
+
         gr.HTML("""
                 <p>For faster inference without waiting in queue, you may duplicate the space and upgrade to GPU in settings. 
                     Follow the github link at the top and host the demo on your own GPU hardware to test out larger models.
@@ -523,7 +531,7 @@ def run_gradio(args, model=None, device=None, tokenizer=None):
                 <img style="margin-top: 0em; margin-bottom: 0em" src="https://bit.ly/3gLdBN6" alt="Duplicate Space"></a>
                 <p/>
                 """)
-        
+
         # Register main generation tab click, outputing generations as well as a the encoded+redecoded+potentially truncated prompt and flag
         generate_btn.click(fn=generate_partial, inputs=[prompt,session_args], outputs=[redecoded_input, truncation_warning, output_without_watermark, output_with_watermark,session_args])
         # Show truncated version of prompt if truncation occurred
@@ -613,84 +621,91 @@ def run_gradio(args, model=None, device=None, tokenizer=None):
     else:
         demo.launch()
 
-def main(args): 
-    """Run a command line version of the generation and detection operations
-        and optionally launch and serve the gradio demo"""
-    # Initial arg processing and log
-    args.normalizers = (args.normalizers.split(",") if args.normalizers else [])
-    print(args)
+def main(args):
+    for delta in range(11):
+        args.delta = delta
+        args.gamma = 0.5
+        args.generation_seed = random.randint(0, sys.maxsize)
+        """Run a command line version of the generation and detection operations
+            and optionally launch and serve the gradio demo"""
+        # Initial arg processing and log
+        args.normalizers = (args.normalizers.split(",") if args.normalizers else [])
+        print(args)
 
-    if not args.skip_model_load:
-        model, tokenizer, device = load_model(args)
-    else:
-        model, tokenizer, device = None, None, None
+        if not args.skip_model_load:
+            model, tokenizer, device = load_model(args)
+        else:
+            model, tokenizer, device = None, None, None
 
-    # Generate and detect, report to stdout
-    if not args.skip_model_load:
-        input_text = (
-        "The diamondback terrapin or simply terrapin (Malaclemys terrapin) is a "
-        "species of turtle native to the brackish coastal tidal marshes of the "
-        "Northeastern and southern United States, and in Bermuda.[6] It belongs "
-        "to the monotypic genus Malaclemys. It has one of the largest ranges of "
-        "all turtles in North America, stretching as far south as the Florida Keys "
-        "and as far north as Cape Cod.[7] The name 'terrapin' is derived from the "
-        "Algonquian word torope.[8] It applies to Malaclemys terrapin in both "
-        "British English and American English. The name originally was used by "
-        "early European settlers in North America to describe these brackish-water "
-        "turtles that inhabited neither freshwater habitats nor the sea. It retains "
-        "this primary meaning in American English.[8] In British English, however, "
-        "other semi-aquatic turtle species, such as the red-eared slider, might "
-        "also be called terrapins. The common name refers to the diamond pattern "
-        "on top of its shell (carapace), but the overall pattern and coloration "
-        "vary greatly. The shell is usually wider at the back than in the front, "
-        "and from above it appears wedge-shaped. The shell coloring can vary "
-        "from brown to grey, and its body color can be grey, brown, yellow, "
-        "or white. All have a unique pattern of wiggly, black markings or spots "
-        "on their body and head. The diamondback terrapin has large webbed "
-        "feet.[9] The species is"
-        )
+        # Generate and detect, report to stdout
+        if not args.skip_model_load:
+            input_text = (
+            "The diamondback terrapin or simply terrapin (Malaclemys terrapin) is a "
+            "species of turtle native to the brackish coastal tidal marshes of the "
+            "Northeastern and southern United States, and in Bermuda.[6] It belongs "
+            "to the monotypic genus Malaclemys. It has one of the largest ranges of "
+            "all turtles in North America, stretching as far south as the Florida Keys "
+            "and as far north as Cape Cod.[7] The name 'terrapin' is derived from the "
+            "Algonquian word torope.[8] It applies to Malaclemys terrapin in both "
+            "British English and American English. The name originally was used by "
+            "early European settlers in North America to describe these brackish-water "
+            "turtles that inhabited neither freshwater habitats nor the sea. It retains "
+            "this primary meaning in American English.[8] In British English, however, "
+            "other semi-aquatic turtle species, such as the red-eared slider, might "
+            "also be called terrapins. The common name refers to the diamond pattern "
+            "on top of its shell (carapace), but the overall pattern and coloration "
+            "vary greatly. The shell is usually wider at the back than in the front, "
+            "and from above it appears wedge-shaped. The shell coloring can vary "
+            "from brown to grey, and its body color can be grey, brown, yellow, "
+            "or white. All have a unique pattern of wiggly, black markings or spots "
+            "on their body and head. The diamondback terrapin has large webbed "
+            "feet.[9] The species is"
+            )
 
-        args.default_prompt = input_text
+            args.default_prompt = input_text
 
-        term_width = 80
-        print("#"*term_width)
-        print("Prompt:")
-        print(input_text)
+            term_width = 80
+            # print("#"*term_width)
+            # print("Prompt:")
+            # print(input_text)
 
-        _, _, decoded_output_without_watermark, decoded_output_with_watermark, _ = generate(input_text, 
-                                                                                            args, 
-                                                                                            model=model, 
-                                                                                            device=device, 
-                                                                                            tokenizer=tokenizer)
-        without_watermark_detection_result = detect(decoded_output_without_watermark, 
-                                                    args, 
-                                                    device=device, 
-                                                    tokenizer=tokenizer)
-        with_watermark_detection_result = detect(decoded_output_with_watermark, 
-                                                 args, 
-                                                 device=device, 
-                                                 tokenizer=tokenizer)
+            (_, _,
+             # decoded_output_without_watermark,
+             decoded_output_with_watermark, _) = generate(input_text,
+                                                                                                args,
+                                                                                                model=model,
+                                                                                                device=device,
+                                                                                                tokenizer=tokenizer)
 
-        print("#"*term_width)
-        print("Output without watermark:")
-        print(decoded_output_without_watermark)
-        print("-"*term_width)
-        print(f"Detection result @ {args.detection_z_threshold}:")
-        pprint(without_watermark_detection_result)
-        print("-"*term_width)
+            # without_watermark_detection_result = detect(decoded_output_without_watermark,
+            #                                             args,
+            #                                             device=device,
+            #                                             tokenizer=tokenizer)
+            with_watermark_detection_result = detect(decoded_output_with_watermark,
+                                                     args,
+                                                     device=device,
+                                                     tokenizer=tokenizer)
 
-        print("#"*term_width)
-        print("Output with watermark:")
-        print(decoded_output_with_watermark)
-        print("-"*term_width)
-        print(f"Detection result @ {args.detection_z_threshold}:")
-        pprint(with_watermark_detection_result)
-        print("-"*term_width)
+            # print("#"*term_width)
+            # print("Output without watermark:")
+            # # print(decoded_output_without_watermark)
+            # print("-"*term_width)
+            # print(f"Detection result @ {args.detection_z_threshold}:")
+            # # pprint(without_watermark_detection_result)
+            # print("-"*term_width)
+            #
+            # print("#"*term_width)
+            # print("Output with watermark:")
+            # print(decoded_output_with_watermark)
+            # print("-"*term_width)
+            # print(f"Detection result @ {args.detection_z_threshold}:")
+            # pprint(with_watermark_detection_result)
+            # print("-"*term_width)
 
 
-    # Launch the app to generate and detect interactively (implements the hf space demo)
-    if args.run_gradio:
-        run_gradio(args, model=model, tokenizer=tokenizer, device=device)
+        # Launch the app to generate and detect interactively (implements the hf space demo)
+        # if args.run_gradio:
+        #     run_gradio(args, model=model, tokenizer=tokenizer, device=device)
 
     return
 
