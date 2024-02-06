@@ -13,9 +13,9 @@ from torch import Tensor
 from tokenizers import Tokenizer
 from transformers import LogitsProcessor, LogitsProcessorList, set_seed
 
-from Crypto.PublicKey import ECC
-from Crypto.Hash import SHA256
-from Crypto.Signature import DSS
+# from Crypto.PublicKey import ECC
+# from Crypto.Hash import SHA256
+# from Crypto.Signature import DSS
 
 
 def tokenize_and_truncate(example: dict,
@@ -72,7 +72,7 @@ class BlacklistLogitsProcessor(LogitsProcessor):
                  vocab_size: int,
                  bl_proportion: float = 0.5,
                  bl_logit_bias: float = 1.0,
-                 bl_type: str = "hard",  # "soft"
+                 bl_type: str = "soft",  # "soft"
                  initial_seed: int = None,
                  dynamic_seed: str = None,  # "initial", "markov_1", None
                  store_bl_ids: bool = True,
@@ -89,7 +89,7 @@ class BlacklistLogitsProcessor(LogitsProcessor):
         self.bl_type = bl_type
         self.signature = signature
         self.need_sig = need_sig
-        self.key = ECC.generate(curve='P-192')
+        # self.key = ECC.generate(curve='P-192')
 
         if initial_seed is None:
             self.initial_seed = None
@@ -176,22 +176,22 @@ class BlacklistLogitsProcessor(LogitsProcessor):
         return sum_renormed_probs
 
     def __call__(self, input_ids: torch.LongTensor, scores: torch.FloatTensor) -> torch.FloatTensor:
-        if self.need_sig:
-            if len(self.signature) == 0:
-                if len(input_ids[0]) < 10:
-                    pass
-                else:
-                    # 待签名内容(发送的文本内容)
-                    message = 'I am MKing Hello Everyone'
-                    # 签名
-                    signer = DSS.new(self.key, 'fips-186-3')
-                    hasher = SHA256.new(message.encode())  # Hash对象，取内容摘要
-                    sign_obj = signer.sign(hasher)  # 用私钥对消息签名
-                    self.signature = bin(int.from_bytes(sign_obj, byteorder='little', signed=False))[2:]
-                    print('签名内容：', bin(int.from_bytes(sign_obj, byteorder='little', signed=False))[2:])
-                    print(len(self.signature))
-            else:
-                self.signature = self.signature[1:]
+        # if self.need_sig:
+        #     if len(self.signature) == 0:
+        #         if len(input_ids[0]) < 10:
+        #             pass
+        #         else:
+        #             # 待签名内容(发送的文本内容)
+        #             message = 'I am MKing Hello Everyone'
+        #             # 签名
+        #             signer = DSS.new(self.key, 'fips-186-3')
+        #             hasher = SHA256.new(message.encode())  # Hash对象，取内容摘要
+        #             sign_obj = signer.sign(hasher)  # 用私钥对消息签名
+        #             self.signature = bin(int.from_bytes(sign_obj, byteorder='little', signed=False))[2:]
+        #             print('签名内容：', bin(int.from_bytes(sign_obj, byteorder='little', signed=False))[2:])
+        #             print(len(self.signature))
+        #     else:
+        #         self.signature = self.signature[1:]
 
         self.bad_words_id_length_1 = [None for _ in range(input_ids.shape[0])]
 
