@@ -34,6 +34,8 @@ from transformers import (AutoTokenizer,
 
 from watermark_processor import WatermarkLogitsProcessor, WatermarkDetector
 
+import csv
+
 def str2bool(v):
     """Util function for user friendly boolean flag args"""
     if isinstance(v, bool):
@@ -265,11 +267,18 @@ def generate(prompt, args, model=None, device=None, tokenizer=None):
     decoded_output_with_watermark = tokenizer.batch_decode(output_with_watermark, skip_special_tokens=True)[0]
 
     correct_chosen, incorrect_chosen = watermark_processor.correct_chosen, watermark_processor.incorrect_chosen
+    gamma = watermark_processor.gamma
     delta = watermark_processor.delta
     print("delta: ", delta)
     print(correct_chosen, incorrect_chosen)
     print(correct_chosen / (correct_chosen + incorrect_chosen))
     print()
+    if correct_chosen + incorrect_chosen > 150:
+        with open("green_chosen_rates.csv", "a+") as f:
+            csv_writer = csv.writer(f)
+            data_row = [gamma, delta, correct_chosen, incorrect_chosen, correct_chosen / (correct_chosen + incorrect_chosen)]
+            csv_writer.writerow(data_row)
+
     return (redecoded_input,
             int(truncation_warning),
             # decoded_output_without_watermark,
@@ -714,4 +723,5 @@ if __name__ == "__main__":
     args = parse_args()
     print(args)
 
-    main(args)
+    for i in range(10):
+        main(args)
