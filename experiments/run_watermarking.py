@@ -529,14 +529,14 @@ if __name__ == "__main__":
         # 0.05
     ]
     deltas = [
-        0,
-        1,
-        2,
-        3,
-        4,
-        5,
-        6,
-        7,
+        # 0,
+        # 1,
+        # 2,
+        # 3,
+        # 4,
+        # 5,
+        # 6,
+        # 7,
         8,
         9,
         10
@@ -599,7 +599,7 @@ if __name__ == "__main__":
                             parser.add_argument(
                                 "--shuffle_seed",
                                 type=int,
-                                default=1234,
+                                default=random.randint(0, sys.maxsize),
                                 help="The seed to use for dataset shuffle op.",
                             )
                             parser.add_argument(
@@ -745,8 +745,8 @@ if __name__ == "__main__":
                             parser.add_argument(
                                 "--output_dir",
                                 type=str,
-                                default="./new/output-" + model + "-" + oracle_model + "-" + str(gamma) + "-" + str(
-                                    gamma) + "-" + str(max_token),
+                                default="./new/ppl_test/output-" + model + "-" + oracle_model + "-" + str(gamma) + "-" + str(
+                                    delta) + "-" + str(max_token),
                                 help="The unique name for the run.",
                             )
                             parser.add_argument(
