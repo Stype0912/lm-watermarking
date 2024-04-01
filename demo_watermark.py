@@ -23,7 +23,7 @@ from pprint import pprint
 from functools import partial
 
 import numpy # for gradio hot reload
-import gradio as gr
+# import gradio as gr
 
 import torch
 
@@ -55,7 +55,7 @@ def parse_args():
     parser.add_argument(
         "--run_gradio",
         type=str2bool,
-        default=True,
+        default=False,
         help="Whether to launch as a gradio demo. Set to False if not installed and want to just run the stdout version.",
     )
     parser.add_argument(
@@ -67,7 +67,7 @@ def parse_args():
     parser.add_argument(
         "--model_name_or_path",
         type=str,
-        default="../models/opt-1.3b",
+        default="../../models/opt-2.7b",
         help="Main model, path to pretrained model or model identifier from huggingface.co/models.",
     )
     parser.add_argument(

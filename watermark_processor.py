@@ -96,6 +96,9 @@ class WatermarkLogitsProcessor(WatermarkBase, LogitsProcessor):
         return final_mask
 
     def _bias_greenlist_logits(self, scores: torch.Tensor, greenlist_mask: torch.Tensor, greenlist_bias: float) -> torch.Tensor:
+        a, idx1 = torch.sort(scores, descending=True)
+        a = a.reshape(-1)[:10]
+        print("here", a.tolist())
         green = scores[greenlist_mask]
         scores[greenlist_mask] = scores[greenlist_mask] + greenlist_bias
         biased_scores = F.softmax(scores, dim=1)
